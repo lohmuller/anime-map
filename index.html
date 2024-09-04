@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mapa de Animes</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    #map {
+      width: 100%;
+      height: 500px;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Mapa de Animes</h1>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    // Inicializa o mapa
+    const map = L.map('map').setView([35.0, 135.0], 5);
+
+    // Adiciona a camada de tiles
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    // Função para carregar e exibir os dados do arquivo como texto bruto
+    fetch('anime_points.txt')
+      .then(response => response.text())  // Carrega como texto
+      .then(text => {
+        try {
+          // Remove colchetes externos  
+
+          const defaultIcon = L.icon({
+            iconUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png',
+            shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
+            iconSize: [25, 41], // Tamanho do ícone
+            iconAnchor: [12, 41], // Posição do ponto de ancoragem do ícone (a base do pino)
+            popupAnchor: [1, -34], // Posição onde o popup vai aparecer relativo ao ícone
+            shadowSize: [41, 41] // Tamanho da sombra
+          });
+          const markers = [];  // Lista para armazenar todos os marcadores
+          function addMarker(lat, lon, name, location, cover) {
+            console.log(name);
+            markers.push(L.marker([lat, lon], { icon: defaultIcon }).bindPopup(
+              `<img src="https://anitabi.cn/${cover}" alt="${name}" style="width: 100px; height: auto;" /><p><strong>${name}</strong></p><p>Localização: ${location}</p>`
+            ));
+          }
+
+          let balance = 0;  // Contador de colchetes
+          let currentChunk = '';  // Armazena o bloco atual
+
+          const chunks = [];
+
+          for (let char of text) {
+            currentChunk += char;
+
+            if (char === '[') {
+              balance++;
+            } else if (char === ']') {
+              balance--;
+            }
+
+            // Quando balance volta a 0, significa que temos um bloco completo
+            if (balance === 0 && currentChunk.trim() !== '') {
+              chunks.push(currentChunk.trim());
+              currentChunk = '';
+            }
+          }
+
+          chunks.forEach(chunk => {
+            // Processar o chunk atual
+
+            // Tente parsear o chunk, se falhar, apenas logue o erro e continue
+            try {
+              // Aqui, você pode aplicar o mesmo processamento para root e nested
+              const animeArray = chunk.split(',');
+              if (!animeArray || animeArray.length < 11) {
+                console.warn("Chunk inválido ou incompleto:", chunk);
+                return; // Pula este chunk e continua com o próximo
+              }
+              /*
+              [0] ID
+              [1] Chinese title
+              [2] 
+              [3] JP Title
+              [4] Location
+              [5] Color
+              [6] Cover
+              [7] ?
+              [8] Category, film (剧场版), Tv, etc
+              [9] lat
+              [10] lon
+              [11] ?
+              [12] ?
+              */
+
+              const titleJp = animeArray[3].replace(/['"]+/g, '');
+              const location = animeArray[4].replace(/['"]+/g, '');
+              const cover = animeArray[6].replace(/['"]+/g, '');
+              const lat = parseFloat(animeArray[9]);
+              const lon = parseFloat(animeArray[10]);
+              console.log(titleJp)
+              if (lat && lon) {
+                // cover,
+                addMarker(lat, lon, titleJp, location, cover);
+              }
+
+              // Processar os itens aninhados
+              const nestedItems = animeArray.slice(13); // Pular os primeiros 13 elementos
+              let nestedItem = nestedItems.join(',').split('],['); // Novamente dividir para aninhados
+              nestedItem.forEach(nested => {
+                let point = nested.split(',');
+
+                /*
+                [0] ID
+                [1] Chinese title
+                [2] JP Title
+                [3] Lat
+                [4] Lon
+                [5] ?
+                [6] ?
+                [7] ?
+                [8] cover
+                [9] ?
+                [10] CN name
+                [11] Time 
+                [12] ?
+                [13] ?
+                [14] ?
+                [15] ?
+                [16] ?
+                [17] ?
+                [18] ? 
+                [19] ?
+                */
+
+                const pointLat = parseFloat(point[3]);
+                const pointLon = parseFloat(point[4]);
+                const pointName = point[1].replace(/['"]+/g, '');
+
+                if (pointLat && pointLon) {
+                  //  addMarker(pointLat, pointLon, titleJp, location);
+                }
+              });
+
+            } catch (error) {
+              console.error('Erro ao processar o chunk:', error);
+            }
+          });
+
+          let index = 0;
+          const batchSize = 10000;
+
+          const intervalId = setInterval(() => {
+            if (index >= markers.length) {
+              clearInterval(intervalId); // Todos os marcadores foram adicionados
+              return;
+            }
+
+            const markerBatch = markers.slice(index, index + batchSize);
+            const markerGroup = L.layerGroup(markerBatch);
+            markerGroup.addTo(map);
+
+            index += batchSize; // Avança para o próximo lote de 100
+          }, 1000);  // Adiciona um lote de 100 marcadores a cada segundo
+
+        } catch (error) {
+          console.error('Erro ao processar o texto:', error);
+        }
+      })
+      .catch(error => console.error('Erro ao carregar o arquivo:', error));
+
+  </script>
+</body>
+
+</html>

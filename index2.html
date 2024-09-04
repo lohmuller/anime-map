@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anime real places</title>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
+    <style>
+        body,
+        html {
+            height: 100%;
+            margin: 0;
+            display: flex;
+            width: 100%
+        }
+
+        #sidebar {
+            width: 300px;
+            background-color: #f4f4f4;
+            padding: 10px;
+            border-right: 1px solid #ddd;
+            transition: transform 0.3s ease;
+            overflow: hidden;
+        }
+
+        #map {
+            flex-grow: 1;
+            width: 100%;
+            height: auto;
+        }
+
+        #searchInput {
+            width: 95%;
+            padding: 5px;
+        }
+
+        #toggleButton {
+            position: absolute;
+            top: 10px;
+            left: 310px;
+            z-index: 1000;
+            padding: 10px;
+            background-color: #333;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            transition: left 0.3s ease;
+        }
+
+        #sidebar.collapsed {
+            transform: translateX(-100%);
+        }
+
+        #toggleButton.collapsed {
+            left: 10px;
+        }
+
+        #animeList {
+            padding: 0px;
+        }
+
+        #animeList li {
+            list-style: none;
+            padding: 10px;
+            margin-left: 0;
+            /* Remove a margem à esquerda */
+            background-color: #f0f0f0;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            cursor: pointer;
+            text-align: center;
+            /* Centraliza o texto */
+            transition: background-color 0.3s ease;
+        }
+
+        #animeList li:hover {
+            background-color: #ddd;
+            /* Cor ao passar o mouse */
+        }
+
+        #animeList li button {
+            background-color: #ff6666;
+            border: none;
+            padding: 5px 10px;
+            margin-left: 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            color: white;
+            font-weight: bold;
+        }
+
+        #animeList li button:hover {
+            background-color: #ff3333;
+        }
+
+        #animeList li.full-click {
+            width: 100%;
+            /* Faz o botão ocupar toda a área */
+        }
+    </style>
+</head>
+
+<body>
+    <div id="sidebar">
+        <input type="text" id="searchInput" placeholder="Filter by anime name..." />
+        <button id="removeSelectedButton" style="display: none;">Remove Markers</button>
+
+        <ul id="animeList" style="overflow-x: scroll;height: -webkit-fill-available;"></ul>
+    </div>
+    <button id="toggleButton" style="display: none;">☰</button>
+    <div id="map"></div>
+
+    <script>
+        const map = L.map('map').setView([35.0, 135.0], 5);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        const markers = L.markerClusterGroup();
+        const allMarkers = [];
+        const animeTitles = {};
+        let translationMap = {};
+
+        // Carrega o JSON com as traduções
+        fetch('en.json')
+            .then(response => response.json())
+            .then(data => {
+                translationMap = data;
+                loadAnimePoints();
+            })
+            .catch(error => console.error('Erro ao carregar o arquivo de tradução:', error));
+
+        function loadAnimePoints() {
+            fetch('anime_points.txt')
+                .then(response => response.text())
+                .then(text => {
+                    try {
+                        const defaultIcon = L.icon({
+                            iconUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png',
+                            shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
+                            iconSize: [25, 41],
+                            iconAnchor: [12, 41],
+                            popupAnchor: [1, -34],
+                            shadowSize: [41, 41]
+                        });
+
+                        function addMarker(lat, lon, name, location, cover, episode, time, note, fulldata) {
+                            const marker = L.marker([lat, lon], { icon: defaultIcon }).bindPopup(
+                                `<img src="https://anitabi.cn/${cover}" alt="${name}" style="width: 300px; height: auto;" />
+                                <p><strong>${name}</strong><br/>
+                                Episode: "${episode}" Time: ${time}<br/>
+                                Place: ${location}</p>
+                                <a target="_blank" href="https://www.google.com/maps?q=${lat},${lon}">maps</a> <br/>
+                                <a target="_blank" href="http://maps.google.com/maps?q=&layer=c&cbll=${lat},${lon}&cbp=11,0,0,0,0">street view</a>
+                                <p>Note:${note}</p>
+                                `
+
+
+                            );
+                            marker.animeName = name;
+                            markers.addLayer(marker);
+                            allMarkers.push(marker);
+
+                            if (!animeTitles[name]) {
+                                animeTitles[name] = [];
+                            }
+                            animeTitles[name].push(marker);
+                        }
+
+                        // Processamento do texto e adição dos marcadores
+                        let balance = 0;
+                        let currentChunk = '';
+                        const chunks = [];
+
+                        for (let char of text) {
+                            currentChunk += char;
+                            if (char === '[') balance++;
+                            else if (char === ']') balance--;
+                            if (balance === 0 && currentChunk.trim() !== '') {
+                                chunks.push(currentChunk.trim());
+                                currentChunk = '';
+                            }
+                        }
+
+                        chunks.forEach(chunk => {
+                            try {
+                                const animeArray = chunk.split(',');
+                                if (!animeArray || animeArray.length < 11) {
+                                    console.warn("Invalid Chunk or incomplete:", chunk);
+                                    return;
+                                }
+
+                                const titleJp = animeArray[3].replace(/['"]+/g, '');
+                                const location = animeArray[4].replace(/['"]+/g, '');
+                                const cover = animeArray[6].replace(/['"]+/g, '');
+                                const lat = parseFloat(animeArray[9]);
+                                const lon = parseFloat(animeArray[10]);
+
+                                if (translationMap[titleJp]) {
+                                    titleEn = translationMap[titleJp];
+                                }
+
+                                if (lat && lon) {
+                                    //    addMarker(lat, lon, titleEn, location, cover, "?", "?");
+                                }
+
+                                const nestedItems = animeArray.slice(13);
+                                let nestedItem = nestedItems.join(',').split('],[');
+                                nestedItem.forEach(nested => {
+                                    let point = nested.split(',');
+
+                                    const id = parseFloat(point[0]);
+
+                                    const pointLat = parseFloat(point[3]);
+                                    const pointLon = parseFloat(point[4]);
+
+                                    const placeName = point[1].replace(/['"]+/g, '');
+                                    const placeImage = point[8].replace(/['"]+/g, '');
+
+                                    const episode = point[10].replace(/['"]+/g, '');
+                                    const time = point[11].replace(/['"]+/g, '');
+                                    const note = point[12].replace(/['"]+/g, '');
+                                    const group = point[15].replace(/['"]+/g, '');
+
+                                    if (pointLat && pointLon) {
+                                        addMarker(pointLat, pointLon, titleEn, placeName, placeImage != 0 ? placeImage : cover, episode, time, note, point);
+                                    }
+                                });
+
+                            } catch (error) {
+                                console.error('Erro ao processar o chunk:', error);
+                            }
+                        });
+
+                        map.addLayer(markers);
+                        populateAnimeList(Object.keys(animeTitles));
+                    } catch (error) {
+                        console.error('Erro ao processar o texto:', error);
+                    }
+                })
+                .catch(error => console.error('Erro ao carregar o arquivo:', error));
+        }
+
+        function populateAnimeList(animeNames) {
+            const animeList = document.getElementById('animeList');
+            animeList.innerHTML = '';
+            animeNames.forEach(name => {
+                const li = document.createElement('li');
+                li.textContent = name;
+                li.addEventListener('click', () => filterMarkers(name));
+                animeList.appendChild(li);
+            });
+        }
+
+        let selectedMarkers = []; // Para armazenar os marcadores selecionados de um grupo
+
+        function filterMarkers(query) {
+            markers.clearLayers(); // Limpa os marcadores do mapa
+            selectedMarkers = []; // Redefine a lista de marcadores selecionados
+            document.getElementById('removeSelectedButton').style.display = 'none'; // Esconde o botão ao mudar de anime
+
+            if (query) {
+                const matchingMarkers = animeTitles[query] || [];
+                const bounds = L.latLngBounds(); // Cria um bounds para ajustar a visualização
+
+                matchingMarkers.forEach(marker => {
+                    markers.addLayer(marker); // Adiciona o marcador ao cluster
+                    bounds.extend(marker.getLatLng()); // Ajusta os limites para incluir o marcador
+                    selectedMarkers.push(marker); // Adiciona o marcador à lista de selecionados
+                });
+
+                if (matchingMarkers.length > 0) {
+                    map.fitBounds(bounds); // Ajusta o zoom para exibir todos os marcadores
+                    document.getElementById('removeSelectedButton').style.display = 'block'; // Mostra o botão de remoção
+                }
+            } else {
+                allMarkers.forEach(marker => markers.addLayer(marker)); // Adiciona todos os marcadores
+            }
+        }
+
+        // Função para remover os marcadores filtrados e mostrar todos
+        document.getElementById('removeSelectedButton').addEventListener('click', function () {
+            if (selectedMarkers.length > 0) {
+                // Remove os marcadores filtrados
+                selectedMarkers.forEach(marker => {
+                    markers.removeLayer(marker);
+                });
+                selectedMarkers = []; // Limpa a lista de marcadores selecionados
+                this.style.display = 'none'; // Esconde o botão
+
+                // Exibe todos os marcadores de volta
+                allMarkers.forEach(marker => markers.addLayer(marker));
+            }
+        });
+
+
+
+        document.getElementById('searchInput').addEventListener('input', function () {
+            const query = this.value.trim().toLowerCase();
+            const filteredNames = Object.keys(animeTitles).filter(name => name.toLowerCase().includes(query));
+            filterMarkers(query);
+            populateAnimeList(filteredNames);
+        });
+
+        document.getElementById('toggleButton').addEventListener('click', function () {
+            const sidebar = document.getElementById('sidebar');
+            sidebar.classList.toggle('collapsed');
+            this.classList.toggle('collapsed');
+        });
+
+    </script>
+</body>
+
+</html>
